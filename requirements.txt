@@ -4,3 +4,7 @@ discord==2.3.2
 pytest==9.2.0
 pytest-asyncio==1.4.1
 pytest_html==4.2.0
+redis
+hiredis
+redis
+hiredis

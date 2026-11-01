@@ -1,8 +1,10 @@
-import urllib.parse
+import json
 import os
+import urllib.parse
 
 import aiohttp
 import discord
+import redis
 from discord.ext import commands
 from discord.ui.button import Button
 
@@ -12,6 +14,7 @@ from src.utils.python_logging import setup_logging
 LEETCODE_WRAPPER = os.getenv("LEETCODE_WRAPPER", "https://leetcode-wrapper.onrender.com")
 
 logger = setup_logging()
+
 
 class LeetCodeCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -142,6 +145,100 @@ class LeetCodeCog(commands.Cog):
         patterns_list: list = self.pattern_service.list_patterns()
         view = self.PatternMenuView(patterns_list)
         await ctx.send("Select a pattern to view problems for:", view=view)
+
+    async def fetch_daily_challenge_data(self):
+        api_url = f"{LEETCODE_WRAPPER}/api/daily"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url) as response:
+                    if response.status != 200:
+                        raise RuntimeError(f"Failed to fetch daily challenge: HTTP {response.status}")
+
+                    data = await response.json()
+                    daily_challenge = data.get("data", {})
+                    title = daily_challenge.get("title", "Unknown")
+                    difficulty = daily_challenge.get("difficulty", "Unknown")
+                    title_slug = daily_challenge.get("titleSlug")
+                    url = f"https://leetcode.com/problems/{title_slug}/" if title_slug else "https://leetcode.com"
+                    return {
+                        "title": title,
+                        "difficulty": difficulty,
+                        "titleSlug": title_slug,
+                        "url": url,
+                    }
+        except Exception as e:
+            logger.error(f"Error fetching daily challenge: {e}")
+            return None
+
+    async def fetch_daily_challenge_embed(self):
+        challenge = await self.fetch_daily_challenge_data()
+        if challenge is None:
+            return None
+
+        embed = discord.Embed(
+            title="LeetCode Daily Challenge",
+            description=f"[{challenge['title']}]({challenge['url']})",
+            color=discord.Color.gold(),
+            url=challenge["url"],
+        )
+        embed.add_field(name="Difficulty", value=challenge["difficulty"], inline=True)
+        embed.set_thumbnail(url="https://leetcode.com/static/images/LeetCode_logo_rvs.png")
+        return embed
+
+    async def store_daily_challenge_in_redis(self, challenge: dict | None = None):
+        if challenge is None:
+            challenge = await self.fetch_daily_challenge_data()
+
+        if challenge is None:
+            return False
+
+        try:
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            client = redis.Redis.from_url(redis_url, decode_responses=True)
+            client.set("daily_leetcode:current", json.dumps(challenge), ex=60 * 60 * 24 * 2)
+            return True
+        except Exception as exc:
+            logger.error(f"Failed to persist daily challenge to Redis: {exc}")
+            return False
+
+    async def post_daily_challenge_to_channel(self, channel_id: int | None = None):
+        if channel_id is None:
+            channel_id = int(os.getenv("DAILY_LEETCODE_CHANNEL_ID", "0"))
+
+        if not channel_id:
+            raise ValueError("DAILY_LEETCODE_CHANNEL_ID is not set")
+
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            channel = await self.bot.fetch_channel(channel_id)
+
+        challenge = await self.fetch_daily_challenge_data()
+        if challenge is None:
+            return False
+
+        await self.store_daily_challenge_in_redis(challenge)
+
+        embed = discord.Embed(
+            title="LeetCode Daily Challenge",
+            description=f"[{challenge['title']}]({challenge['url']})",
+            color=discord.Color.gold(),
+            url=challenge["url"],
+        )
+        embed.add_field(name="Difficulty", value=challenge["difficulty"], inline=True)
+        embed.set_thumbnail(url="https://leetcode.com/static/images/LeetCode_logo_rvs.png")
+
+        await channel.send(embed=embed)
+        return True
+
+    @commands.command(name="daily")
+    async def leetcode_daily(self, ctx: commands.Context):
+        logger.info(f"Fetching LeetCode daily challenge for user: {ctx.author.name}")
+        embed = await self.fetch_daily_challenge_embed()
+        if embed is None:
+            await ctx.send("An error occurred while fetching the daily challenge.")
+            return
+
+        await ctx.send(embed=embed)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(LeetCodeCog(bot))

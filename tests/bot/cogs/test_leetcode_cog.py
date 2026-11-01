@@ -1,9 +1,11 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
 from discord.ext import commands
 
+import main
 from src.bot.cogs.leetcode_cog import LeetCodeCog
 
 
@@ -109,3 +111,48 @@ async def test_patterns_command_is_registered_on_bot():
 
     assert command is not None
     assert command.name == "patterns"
+
+
+def test_cron_endpoint_rejects_missing_secret(monkeypatch):
+    monkeypatch.setenv("DAILY_LEETCODE_CHANNEL_ID", "123456")
+    monkeypatch.setenv("CRON_SECRET", "super-secret")
+    monkeypatch.setattr(main.bot, "is_ready", lambda: True)
+
+    response = main.app.test_client().get("/cron/daily-leetcode")
+
+    assert response.status_code == 403
+    assert response.json["status"] == "error"
+
+
+def test_cron_endpoint_posts_daily_challenge(monkeypatch):
+    monkeypatch.setenv("DAILY_LEETCODE_CHANNEL_ID", "123456")
+    monkeypatch.setenv("CRON_SECRET", "super-secret")
+    monkeypatch.setattr(main.bot, "is_ready", lambda: True)
+    try:
+        main.bot.loop = asyncio.get_running_loop()
+    except RuntimeError:
+        main.bot.loop = None
+
+    fake_cog = MagicMock()
+    fake_cog.fetch_daily_challenge_data = AsyncMock(
+        return_value={"title": "Two Sum", "difficulty": "Easy", "titleSlug": "two-sum", "url": "https://leetcode.com/problems/two-sum/"}
+    )
+    fake_cog.post_daily_challenge_to_channel = AsyncMock(return_value=True)
+    monkeypatch.setattr(main.bot, "get_cog", lambda name: fake_cog)
+
+    def fake_run_coroutine_threadsafe(coro, loop):
+        mock_task = MagicMock()
+        mock_task.result.return_value = asyncio.run(coro)
+        return mock_task
+
+    monkeypatch.setattr(main.asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
+
+    mock_redis = MagicMock()
+    monkeypatch.setattr(main, "get_redis_client", lambda: mock_redis)
+
+    response = main.app.test_client().get("/cron/daily-leetcode?token=super-secret")
+
+    assert response.status_code == 200
+    assert response.json["status"] == "ok"
+    fake_cog.post_daily_challenge_to_channel.assert_awaited_once_with(123456)
+    mock_redis.set.assert_called_once()

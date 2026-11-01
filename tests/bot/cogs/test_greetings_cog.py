@@ -1,4 +1,6 @@
+import discord
 import pytest
+from discord.ext import commands
 from unittest.mock import AsyncMock, MagicMock
 from src.bot.cogs.greetings_cog import GreetingsCog
 
@@ -38,3 +40,14 @@ async def test_on_member_join(cog):
     # 3. Assert: Check if the channel sent the correct welcome message
     expected_message = "Welcome to TestGuild, @NewUser! Please read the rules."
     mock_channel.send.assert_awaited_once_with(expected_message)
+
+
+@pytest.mark.asyncio
+async def test_help_command_registers_without_conflict():
+    bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
+    bot.remove_command("help")
+    await bot.add_cog(GreetingsCog(bot))
+
+    command = bot.get_command("help")
+    assert command is not None
+    assert command.name == "help"

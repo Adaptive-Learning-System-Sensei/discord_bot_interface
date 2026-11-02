@@ -27,6 +27,25 @@ def get_redis_client():
     return redis.Redis.from_url(redis_url, decode_responses=True)
 
 
+def get_provided_secret():
+    return (
+        request.args.get("token")
+        or request.headers.get("X-Cron-Secret")
+        or request.headers.get("Authorization", "").replace("Bearer ", "")
+    )
+
+
+@app.route("/keepalive", methods=["GET", "POST"])
+@app.route("/health", methods=["GET", "POST"])
+def keepalive():
+    cron_secret = os.getenv("CRON_SECRET")
+    provided_secret = get_provided_secret()
+    if cron_secret and provided_secret != cron_secret:
+        return jsonify({"status": "error", "message": "Unauthorized"}), 403
+
+    return jsonify({"status": "ok", "message": "Server is alive"}), 200
+
+
 @app.route("/cron/daily-leetcode", methods=["GET", "POST"])
 def cron_daily_leetcode():
     channel_id = os.getenv("DAILY_LEETCODE_CHANNEL_ID")
@@ -48,7 +67,7 @@ def cron_daily_leetcode():
         }), 400
 
     cron_secret = os.getenv("CRON_SECRET")
-    provided_secret = request.args.get("token") or request.headers.get("X-Cron-Secret") or request.headers.get("Authorization", "").replace("Bearer ", "")
+    provided_secret = get_provided_secret()
     if cron_secret and provided_secret != cron_secret:
         return jsonify({"status": "error", "message": "Unauthorized"}), 403
 

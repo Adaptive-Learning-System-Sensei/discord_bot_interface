@@ -113,6 +113,16 @@ async def test_patterns_command_is_registered_on_bot():
     assert command.name == "patterns"
 
 
+def test_keepalive_endpoint_returns_ok(monkeypatch):
+    monkeypatch.setenv("CRON_SECRET", "super-secret")
+
+    response = main.app.test_client().get("/keepalive?token=super-secret")
+
+    assert response.status_code == 200
+    assert response.json["status"] == "ok"
+    assert response.json["message"] == "Server is alive"
+
+
 def test_cron_endpoint_rejects_missing_secret(monkeypatch):
     monkeypatch.setenv("DAILY_LEETCODE_CHANNEL_ID", "123456")
     monkeypatch.setenv("CRON_SECRET", "super-secret")

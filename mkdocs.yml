@@ -1,0 +1,41 @@
+site_name: "Discord Bot Interface Documentation"
+site_description: "Architecture, deployment, and testing documentation for Avinash's Discord Bot."
+site_author: "Avinash"
+site_url: "https://learnwithsensei.io"
+
+theme:
+  name: material
+  palette:
+    - scheme: default     # Light mode
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate       # Dark mode
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+
+# Map navigation directly to your bot modules
+nav:
+  - Home: index.md
+  - Architecture & Cogs:
+    - Overview: architecture/overview.md
+    - General & Greetings Cogs: architecture/greetings.md
+    - LeetCode Integration: architecture/leetcode.md
+  - Deployment & Infrastructure:
+    - Docker & Compose: deployment/docker.md
+    - Logging: deployment/logging.md
+  - Testing & Quality:
+    - Test Suite: testing/tests.md

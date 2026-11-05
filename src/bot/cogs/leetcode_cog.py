@@ -201,6 +201,112 @@ class LeetCodeCog(commands.Cog):
             logger.error(f"Failed to persist daily challenge to Redis: {exc}")
             return False
 
+    async def send_daily_challenge_reminder(self, user_ids: list[int] | int | None = None):
+        if user_ids is None:
+            raw_value = (
+                os.getenv("LEETCODE_REMINDER_USER_ID")
+                or os.getenv("DISCORD_REMINDER_USER_ID")
+                or os.getenv("DISCORD_USER_ID")
+                or ""
+            )
+            user_ids = []
+            for value in raw_value.split(","):
+                cleaned = value.strip()
+                if cleaned:
+                    try:
+                        user_ids.append(int(cleaned))
+                    except ValueError:
+                        continue
+
+        if isinstance(user_ids, int):
+            user_ids = [user_ids]
+
+        if not user_ids:
+            raise ValueError("LEETCODE_REMINDER_USER_ID is not set")
+
+        challenge = await self.fetch_daily_challenge_data()
+        if challenge is None:
+            return False
+
+        embed = discord.Embed(
+            title="LeetCode Daily Challenge Reminder",
+            description=f"[{challenge['title']}]({challenge['url']})",
+            color=discord.Color.gold(),
+            url=challenge["url"],
+        )
+        embed.add_field(name="Difficulty", value=challenge["difficulty"], inline=True)
+        embed.set_thumbnail(url="https://leetcode.com/static/images/LeetCode_logo_rvs.png")
+        embed.set_footer(text="Solve today’s challenge before it slips away.")
+
+        sent = False
+        for user_id in user_ids:
+            user = self.bot.get_user(user_id)
+            if user is None:
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                except discord.NotFound:
+                    continue
+                except Exception:
+                    continue
+
+            if user is None:
+                continue
+
+            await user.send(
+                "Hey! It’s time for today’s LeetCode daily challenge. Don’t forget to solve it.",
+                embed=embed,
+            )
+            sent = True
+
+        return sent
+
+    async def send_daily_challenge_reminder_to_server(self, guild_id: int | None = None):
+        if guild_id is None:
+            guild_id = int(os.getenv("DAILY_LEETCODE_GUILD_ID") or os.getenv("LEETCODE_GUILD_ID") or "0")
+
+        if not guild_id:
+            raise ValueError("DAILY_LEETCODE_GUILD_ID is not set")
+
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            try:
+                guild = await self.bot.fetch_guild(guild_id)
+            except Exception:
+                return False
+
+        if guild is None:
+            return False
+
+        challenge = await self.fetch_daily_challenge_data()
+        if challenge is None:
+            return False
+
+        embed = discord.Embed(
+            title="LeetCode Daily Challenge Reminder",
+            description=f"[{challenge['title']}]({challenge['url']})",
+            color=discord.Color.gold(),
+            url=challenge["url"],
+        )
+        embed.add_field(name="Difficulty", value=challenge["difficulty"], inline=True)
+        embed.set_thumbnail(url="https://leetcode.com/static/images/LeetCode_logo_rvs.png")
+        embed.set_footer(text="Solve today’s challenge before it slips away.")
+
+        sent = False
+        for member in guild.members:
+            if member.bot:
+                continue
+
+            try:
+                await member.send(
+                    "Hey! It’s time for today’s LeetCode daily challenge. Don’t forget to solve it.",
+                    embed=embed,
+                )
+                sent = True
+            except Exception:
+                continue
+
+        return sent
+
     async def post_daily_challenge_to_channel(self, channel_id: int | None = None):
         if channel_id is None:
             channel_id = int(os.getenv("DAILY_LEETCODE_CHANNEL_ID", "0"))

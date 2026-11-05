@@ -16,6 +16,8 @@ app = Flask(__name__)
 def create_bot():
     intents = discord.Intents.default()
     intents.message_content = True
+    intents.members = True
+    intents.guilds = True
     return myBot(command_prefix=discord_commands.when_mentioned_or("!"), intents=intents)
 
 
@@ -33,6 +35,38 @@ def get_provided_secret():
         or request.headers.get("X-Cron-Secret")
         or request.headers.get("Authorization", "").replace("Bearer ", "")
     )
+
+
+def get_daily_leetcode_reminder_user_ids():
+    raw_value = (
+        os.getenv("LEETCODE_REMINDER_USER_ID")
+        or os.getenv("DISCORD_REMINDER_USER_ID")
+        or os.getenv("DISCORD_USER_ID")
+        or ""
+    )
+    if not raw_value:
+        return []
+
+    user_ids = []
+    for item in raw_value.split(","):
+        cleaned = item.strip()
+        if not cleaned:
+            continue
+        try:
+            user_ids.append(int(cleaned))
+        except ValueError:
+            continue
+    return user_ids
+
+
+def get_daily_leetcode_guild_id():
+    raw_value = os.getenv("DAILY_LEETCODE_GUILD_ID") or os.getenv("LEETCODE_GUILD_ID") or ""
+    if not raw_value:
+        return None
+    try:
+        return int(raw_value)
+    except ValueError:
+        return None
 
 
 @app.route("/keepalive", methods=["GET", "POST"])
@@ -95,6 +129,43 @@ def cron_daily_leetcode():
     if result:
         return jsonify({"status": "ok", "message": "Daily challenge posted"}), 200
     return jsonify({"status": "error", "message": "Unable to post daily challenge"}), 500
+
+
+@app.route("/cron/daily-leetcode-dm", methods=["GET", "POST"])
+def cron_daily_leetcode_dm():
+    guild_id = get_daily_leetcode_guild_id()
+    if guild_id is None:
+        return jsonify({"status": "error", "message": "DAILY_LEETCODE_GUILD_ID is not set"}), 400
+
+    cron_secret = os.getenv("CRON_SECRET")
+    provided_secret = get_provided_secret()
+    if cron_secret and provided_secret != cron_secret:
+        return jsonify({"status": "error", "message": "Unauthorized"}), 403
+
+    if not bot.is_ready():
+        return jsonify({"status": "error", "message": "Bot is not ready yet"}), 503
+
+    async def _send_dm_reminder():
+        cog = bot.get_cog("LeetCodeCog")
+        if cog is None:
+            return False
+
+        challenge = await cog.fetch_daily_challenge_data()
+        if challenge is None:
+            return False
+
+        try:
+            get_redis_client().set("daily_leetcode:current", json.dumps(challenge), ex=60 * 60 * 24 * 2)
+        except Exception:
+            pass
+
+        return await cog.send_daily_challenge_reminder_to_server(guild_id)
+
+    task = asyncio.run_coroutine_threadsafe(_send_dm_reminder(), bot.loop)
+    result = task.result(timeout=30)
+    if result:
+        return jsonify({"status": "ok", "message": "Daily challenge reminder sent via DM"}), 200
+    return jsonify({"status": "error", "message": "Unable to send reminders to server members"}), 500
 
 
 def start_webhook_server():

@@ -166,3 +166,37 @@ def test_cron_endpoint_posts_daily_challenge(monkeypatch):
     assert response.json["status"] == "ok"
     fake_cog.post_daily_challenge_to_channel.assert_awaited_once_with(123456)
     mock_redis.set.assert_called_once()
+
+
+def test_cron_endpoint_sends_dm_reminder_to_server_members(monkeypatch):
+    monkeypatch.setenv("DAILY_LEETCODE_GUILD_ID", "987654321")
+    monkeypatch.setenv("CRON_SECRET", "super-secret")
+    monkeypatch.setattr(main.bot, "is_ready", lambda: True)
+    try:
+        main.bot.loop = asyncio.get_running_loop()
+    except RuntimeError:
+        main.bot.loop = None
+
+    fake_cog = MagicMock()
+    fake_cog.fetch_daily_challenge_data = AsyncMock(
+        return_value={"title": "Two Sum", "difficulty": "Easy", "titleSlug": "two-sum", "url": "https://leetcode.com/problems/two-sum/"}
+    )
+    fake_cog.send_daily_challenge_reminder_to_server = AsyncMock(return_value=True)
+    monkeypatch.setattr(main.bot, "get_cog", lambda name: fake_cog)
+
+    def fake_run_coroutine_threadsafe(coro, loop):
+        mock_task = MagicMock()
+        mock_task.result.return_value = asyncio.run(coro)
+        return mock_task
+
+    monkeypatch.setattr(main.asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
+
+    mock_redis = MagicMock()
+    monkeypatch.setattr(main, "get_redis_client", lambda: mock_redis)
+
+    response = main.app.test_client().get("/cron/daily-leetcode-dm?token=super-secret")
+
+    assert response.status_code == 200
+    assert response.json["status"] == "ok"
+    fake_cog.send_daily_challenge_reminder_to_server.assert_awaited_once_with(987654321)
+    mock_redis.set.assert_called_once()
